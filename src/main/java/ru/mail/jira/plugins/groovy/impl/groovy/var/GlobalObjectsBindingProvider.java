@@ -32,6 +32,7 @@ public class GlobalObjectsBindingProvider implements BindingProvider, PluginLife
     private final Logger logger = LoggerFactory.getLogger(GlobalObjectsBindingProvider.class);
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
+    private volatile boolean initialized = false;
     private volatile Map<String, BindingDescriptor<?>> objects = ImmutableMap.of();
     private volatile Map<String, Class> types = ImmutableMap.of();
 
@@ -127,8 +128,33 @@ public class GlobalObjectsBindingProvider implements BindingProvider, PluginLife
         });
     }
 
+    private void unsafeInitialize() {
+        delegatingClassLoader.registerClassLoader("__go", globalObjectClassLoader);
+        scriptService.registerBindingProvider(this);
+        initialized = true;
+    }
+
+    private void initializePrematurely() {
+        Lock wLock = rwLock.writeLock();
+        wLock.lock();
+        try {
+            if (initialized) {
+                return;
+            }
+
+            logger.warn("doing premature initialization");
+            unsafeInitialize();
+        } finally {
+            wLock.unlock();
+        }
+    }
+
     @Override
     public Map<String, BindingDescriptor<?>> getBindings() {
+        if (!initialized) {
+            initializePrematurely();
+        }
+
         Lock rLock = rwLock.readLock();
         rLock.lock();
         try {
@@ -144,9 +170,16 @@ public class GlobalObjectsBindingProvider implements BindingProvider, PluginLife
 
     @Override
     public void onStart() {
-        this.unsafeLoadCaches();
-        delegatingClassLoader.registerClassLoader("__go", globalObjectClassLoader);
-        scriptService.registerBindingProvider(this);
+        ReentrantReadWriteLock.WriteLock wLock = rwLock.writeLock();
+        wLock.lock();
+        try {
+            this.unsafeLoadCaches();
+            if (!initialized) {
+                this.unsafeInitialize();
+            }
+        } finally {
+            wLock.unlock();
+        }
     }
 
     @Override
