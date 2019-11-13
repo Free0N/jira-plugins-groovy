@@ -25,6 +25,6 @@ matrix:
 notifications:
   email:
     recipients:
-      - a.belostotskiy@corp.mail.ru
+      - afanasev.p@gmail.com
     on_success: always
     on_failure: always
